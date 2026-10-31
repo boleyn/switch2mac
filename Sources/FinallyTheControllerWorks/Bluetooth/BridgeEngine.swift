@@ -148,6 +148,11 @@ final class BridgeEngine: NSObject, ObservableObject, @unchecked Sendable {
             sink.onRumble = { [weak self] player, strong, weakMag in
                 self?.setRumble(player: player, strong: strong, weak: weakMag)
             }
+            if let udp = sink as? UDPHub {
+                udp.onHDRumble = { [weak self] player, data in
+                    self?.setHDRumble(player: player, data: data)
+                }
+            }
             self.sinks.append(sink)
         }
     }
@@ -159,6 +164,15 @@ final class BridgeEngine: NSObject, ObservableObject, @unchecked Sendable {
     private static func rumbleIntensity(forSerial serial: String) -> Double {
         let store = UserDefaults.standard.dictionary(forKey: "controllerSettings")
         return (store?[serial] as? [String: Any])?["rumble"] as? Double ?? 1.0
+    }
+
+    func setHDRumble(player: Int, data: Data) {
+        btQueue.async { [weak self] in
+            guard let self, let logical=self.players[player] else { return }
+            let scale=Self.rumbleIntensity(forSerial: logical.id)
+            guard let hd=Switch2.HDRumble.decode(data,scale:scale) else { return }
+            for slot in logical.slots { self.sessions[slot]?.setHDRumble(hd) }
+        }
     }
 
     func setRumble(player: Int, strong: Double, weak weakMag: Double) {

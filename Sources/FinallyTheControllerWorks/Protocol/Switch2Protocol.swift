@@ -423,6 +423,41 @@ enum Switch2 {
         }
     }
 
+    /// Local S2H1 extension: game-native low/high amplitude and Hz per handle.
+    struct HDRumble: Sendable {
+        var left: Vibration
+        var right: Vibration
+        static func decode(_ data: Data, scale: Double = 1) -> HDRumble? {
+            guard data.count == 36, Array(data.prefix(4)) == [0x53,0x32,0x48,0x31] else { return nil }
+            var v: [Double] = []
+            for i in 0..<8 {
+                let p = 4+i*4
+                let b = UInt32(data[p]) | UInt32(data[p+1])<<8 | UInt32(data[p+2])<<16 | UInt32(data[p+3])<<24
+                let f = Double(Float(bitPattern: b))
+                guard f.isFinite else { return nil }
+                v.append(f)
+            }
+            func motor(_ i: Int) -> Vibration {
+                Vibration(lfFreq: UInt16(min(511,max(1,v[i+1]))),
+                          lfAmp: UInt16(min(1,max(0,v[i]*scale))*1023),
+                          hfFreq: UInt16(min(511,max(1,v[i+3]))),
+                          hfAmp: UInt16(min(1,max(0,v[i+2]*scale))*1023))
+            }
+            return HDRumble(left: motor(0), right: motor(4))
+        }
+        var active: Bool { left.lfAmp > 0 || left.hfAmp > 0 || right.lfAmp > 0 || right.hfAmp > 0 }
+    }
+    static func motorPacket(left: Vibration, right: Vibration, packetID: UInt8, model: Model) -> Data {
+        func block(_ v: Vibration) -> Data {
+            var d = Data([0x50 + (packetID & 15)])
+            let sample=v.packed(); d.append(sample); d.append(sample); d.append(sample)
+            return d
+        }
+        var d=Data([0]); d.append(block(left))
+        if model == .proController2 { d.append(block(right)) }
+        return d
+    }
+
     /// Build one motor packet: three identical sub-frame samples per block so
     /// the actuator runs continuously; Pro takes two blocks (L+R motors).
     static func motorPacket(_ vib: Vibration, packetID: UInt8, model: Model) -> Data {

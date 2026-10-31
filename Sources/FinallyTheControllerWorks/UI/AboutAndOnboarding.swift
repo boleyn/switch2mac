@@ -17,7 +17,7 @@ enum AppInfo {
     /// appcast.json as an asset, and releases/latest always points at the
     /// newest one. The Configuration field remains an override for testing.
     static let defaultUpdateFeedURL =
-        "https://github.com/Peterksharma/switch2mac/releases/latest/download/appcast.json"
+        "" // Local HD extension build: official updates do not carry this protocol.
 
     /// Pre-release features hidden from the beta UI: the party-game and
     /// gesture menu items, keyboard mapping, and the Experiments cluster.

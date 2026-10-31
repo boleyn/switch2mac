@@ -18,6 +18,7 @@ final class UDPHub: ControllerOutputSink, @unchecked Sendable {
     private static let basePort: UInt16 = 24800
     private static let peerTTL: TimeInterval = 30
 
+    var onHDRumble: ((Int, Data) -> Void)?
     var onRumble: ((Int, Double, Double) -> Void)?
 
     private final class SlotSocket {
@@ -108,6 +109,12 @@ final class UDPHub: ControllerOutputSink, @unchecked Sendable {
             if isNewPeer, !s.name.isEmpty {
                 // Late joiners get the name before their first state packet.
                 send(Self.namePacket(s.name), to: peer, via: s.fd)
+            }
+            if n == 4, Array(buf.prefix(4)) == [0x53,0x32,0x51,0x31] {
+                send(Data([0x53,0x32,0x43,0x31,1,0,0,0]),to:peer,via:s.fd)
+            }
+            if n == 36, Array(buf.prefix(4)) == [0x53,0x32,0x48,0x31] {
+                onHDRumble?(slot, Data(buf.prefix(n)))
             }
             if n >= 6, buf[0] == 0x53, buf[1] == 0x32, buf[2] == 0x52, buf[3] == 0x31 {  // "S2R1"
                 onRumble?(slot, Double(buf[4]) / 255.0, Double(buf[5]) / 255.0)

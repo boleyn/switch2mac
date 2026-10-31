@@ -78,6 +78,8 @@ final class ControllerSession: NSObject, @unchecked Sendable {
     private var keepAliveTimer: DispatchSourceTimer?
     private var lastWriteAt: TimeInterval = 0
     private var vibrationPacketID: UInt8 = 0
+    private var hdTarget: Switch2.HDRumble?
+    private var hdSetAt: TimeInterval = 0
     private var rumbleTarget: (strong: Double, weak: Double) = (0, 0)
     private var rumbleSetAt: TimeInterval = 0
     private var rumbleActive = false
@@ -579,19 +581,28 @@ final class ControllerSession: NSObject, @unchecked Sendable {
         }
     }
 
-    // MARK: - Keep-alive + rumble (shared 50 ms cadence)
+    // MARK: - Keep-alive + rumble (10 ms for continuous HD packets)
 
     func setRumble(strong: Double, weak: Double) {
         queue.async { [weak self] in
             guard let self else { return }
+            self.hdTarget = nil
             self.rumbleTarget = (strong, weak)
             self.rumbleSetAt = CFAbsoluteTimeGetCurrent()
         }
     }
 
+    func setHDRumble(_ value: Switch2.HDRumble) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.hdTarget=value; self.hdSetAt=CFAbsoluteTimeGetCurrent()
+            self.rumbleTarget=(0,0)
+        }
+    }
+
     private func startKeepAlive() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 0.05, repeating: 0.05)
+        timer.schedule(deadline: .now() + 0.01, repeating: 0.01)
         timer.setEventHandler { [weak self] in self?.maintainTick() }
         timer.resume()
         keepAliveTimer = timer
@@ -599,6 +610,22 @@ final class ControllerSession: NSObject, @unchecked Sendable {
 
     private func maintainTick() {
         let now = CFAbsoluteTimeGetCurrent()
+        if let hd=hdTarget {
+            let active=now-hdSetAt < 0.3 && hd.active
+            if active || rumbleActive {
+                guard peripheral.canSendWriteWithoutResponse,
+                      let motor=chars[Switch2.GATT.vibration(for:model)] else { return }
+                let silent=Switch2.Vibration()
+                let packet=Switch2.motorPacket(left:active ? hd.left : silent,
+                                               right:active ? hd.right : silent,
+                                               packetID:vibrationPacketID,model:model)
+                vibrationPacketID &+= 1
+                peripheral.writeValue(packet,for:motor,type:.withoutResponse)
+                lastWriteAt=now; rumbleActive=active
+                return
+            }
+            if now-hdSetAt >= 0.3 { hdTarget=nil }
+        }
         var (strong, weakMag) = rumbleTarget
         // Failsafe: rumble intents expire after 0.5 s so a crashed consumer
         // can never leave the motor running.
